@@ -30,6 +30,7 @@ Output HARUS valid JSON saja, TANPA penjelasan, TANPA markdown code block.
 
 Schema:
 {
+  "type": <one of: "expense", "income">,
   "amount": <number, dalam rupiah, contoh: 15000>,
   "category": <one of: ${VALID_CATEGORIES.join(', ')}>,
   "description": <string singkat, max 50 karakter>,
@@ -38,6 +39,9 @@ Schema:
 }
 
 Aturan:
+- WAJIB keluarkan property "type" dengan nilai HANYA "expense" atau "income" (WAJIB bahasa inggris dan key-nya 'type').
+- PENTING: Jika pesan mengandung kata "masuk", "gaji", "dikasih", "dapet", "transferan", maka "type": "income". (contoh: "uang masuk 1 juta dari bunda" -> "type": "income")
+- Jika pesan tentang beli, bayar, abis, jajan, keluar, maka "type": "expense". (contoh: "beli makan 20rb" -> "type": "expense")
 - "rb" = ribu, "jt" = juta, "k" = ribu (contoh: "15k" = 15000)
 - "10rb" = 10000, "1.5jt" = 1500000
 - Kalau payment method nggak disebut, isi "unknown"
@@ -73,6 +77,18 @@ export async function parseWithGemini(userText) {
           temperature: 0.1, // Rendah karena tugas deterministik
           maxOutputTokens: 200,
           responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              type: { type: 'STRING', enum: ['income', 'expense'] },
+              amount: { type: 'NUMBER' },
+              category: { type: 'STRING', enum: VALID_CATEGORIES },
+              description: { type: 'STRING' },
+              payment_method: { type: 'STRING', enum: VALID_PAYMENT_METHODS },
+              confidence: { type: 'NUMBER' }
+            },
+            required: ['type', 'amount', 'category', 'description', 'payment_method', 'confidence']
+          }
         },
       },
       {
@@ -103,6 +119,7 @@ export async function parseWithGemini(userText) {
     }
 
     logger.info({ parsed }, 'Gemini extraction success');
+    console.log('RAW GEMINI PARSED:', parsed);
     return parsed;
 
   } catch (err) {
@@ -135,11 +152,18 @@ function fallbackParser(text) {
     }
   }
 
-  return {
+  const isIncome = /masuk|gaji|dikasih|dapet|transferan/i.test(text);
+  const type = isIncome ? 'income' : 'expense';
+
+  const result = {
+    type,
     amount,
     category: 'lainnya',
     description: text.substring(0, 50),
     payment_method: paymentMethod,
     confidence: 0.5,
   };
+
+  console.log('RAW GEMINI PARSED (FALLBACK):', result);
+  return result;
 }
