@@ -5,6 +5,12 @@ export const users = pgTable('users', {
   wa_number: varchar('wa_number', { length: 50 }).notNull().unique(),
   display_name: varchar('display_name', { length: 100 }),
   monthly_budget: integer('monthly_budget').default(0).notNull(), // As default temporary budget
+  onboarding_step: varchar('onboarding_step', { length: 20 }).default('ASK_BUDGET').notNull(),
+  wishlist_name: text('wishlist_name'),
+  wishlist_target: integer('wishlist_target'),
+  tier: text('tier').default('free').notNull(),
+  chat_count: integer('chat_count').default(0).notNull(),
+  last_chat_date: timestamp('last_chat_date'),
   created_at: timestamp('created_at').defaultNow().notNull(),
 });
 

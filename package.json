@@ -25,6 +25,7 @@
     "axios": "^1.7.9",
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.45.2",
+    "openai": "^6.36.0",
     "pino": "^9.6.0",
     "postgres": "^3.4.9",
     "qrcode-terminal": "^0.12.0"

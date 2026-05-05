@@ -1,11 +1,12 @@
 import { createLogger } from '../utils/logger.js';
-import { parseWithGemini } from '../services/gemini.js';
-import { roastWithAI } from '../services/roaster.js';
+import { parseWithAI, parseWishlistWithAI, roastWithAI } from '../services/ai.js';
 import { db } from '../db/index.js';
 import { users, transactions } from '../db/schema.js';
 import { eq, and, gte, sql } from 'drizzle-orm';
 
 const logger = createLogger('router');
+
+const SPAM_CACHE = new Map();
 
 /**
  * Pola command yang bisa di-handle tanpa LLM (hemat token).
@@ -16,6 +17,7 @@ const COMMAND_HANDLERS = {
   '/sisa':    handleBalanceCommand,
   '/help':    handleHelpCommand,
   '/wishlist': handleWishlistCommand,
+  '/upgrade': handleUpgradeCommand,
 };
 
 /**
@@ -34,6 +36,20 @@ export async function handleIncomingMessage(sock, msg) {
   const text = extractText(msg);
 
   if (!text) return; // Abaikan non-text (gambar, sticker, dll) untuk MVP
+
+  // ── SPAM FILTER ────────────────────────────────
+  const now = Date.now();
+  if (!SPAM_CACHE.has(jid)) {
+    SPAM_CACHE.set(jid, []);
+  }
+  const timestamps = SPAM_CACHE.get(jid).filter(t => now - t < 5000);
+  timestamps.push(now);
+  SPAM_CACHE.set(jid, timestamps);
+
+  if (timestamps.length > 3) {
+    logger.warn(`Spam detected from ${jid}`);
+    return;
+  }
 
   logger.info(`📩 [${jid}]: ${text}`);
 
@@ -59,14 +75,95 @@ export async function handleIncomingMessage(sock, msg) {
       const inserted = await db.insert(users).values({
         wa_number: jid,
         display_name: display_name,
-        monthly_budget: 1000000, // Default 1 juta untuk MVP
+        monthly_budget: 0, // Default 0 untuk ditanya nanti
+        onboarding_step: 'ASK_BUDGET'
       }).returning();
       user = inserted[0];
     }
 
-    // AI Engine 1: Gemini → Parse ke JSON transaksi
-    const parsed = await parseWithGemini(text);
-    logger.info({ parsed }, 'Gemini parsed result');
+    // ── QUOTA CHECKER ──────────────────────────────
+    if (user.tier === 'free' && user.chat_count >= 30) {
+      await sendReply(sock, jid, msg, "Kuota gratis lo bulan ini udah abis bos! Biar gue tetep bisa nyatet dan ngeroast lo, yuk upgrade ke Premium (Rp 15.000/bulan). Ketik /upgrade buat info lanjut! 💸");
+      return;
+    }
+
+    // ── State Machine: Onboarding Flow ─────────────────────
+    if (user.onboarding_step === 'ASK_BUDGET') {
+      await db.update(users).set({ 
+        onboarding_step: 'WAITING_BUDGET',
+        chat_count: sql`${users.chat_count} + 1`,
+        last_chat_date: new Date()
+      }).where(eq(users.id, user.id));
+      await sendReply(sock, jid, msg, "Halo bos! Gue Cuanly, asisten keuangan lo yang anti-basa-basi. Biar gue bisa mantau dompet lo, uang saku/gaji lo bulan ini berapa totalnya?");
+      return;
+    }
+
+    if (user.onboarding_step === 'WAITING_BUDGET') {
+      // Bersihkan kata 'rp', spasi, dan titik
+      let cleanText = text.toLowerCase().replace(/rp|\s|\./g, '');
+      // Konversi singkatan menjadi angka nol
+      cleanText = cleanText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
+      // Ekstrak angka yang tersisa
+      const match = cleanText.match(/\d+/);
+      const amount = match ? parseInt(match[0], 10) : 0;
+      
+      if (amount <= 0) {
+         await sendReply(sock, jid, msg, "Wah, gw ga ngerti angkanya. Coba ketik yang bener, misal: '1 juta' atau '2000000'");
+         return;
+      }
+
+      await db.update(users).set({ 
+        monthly_budget: amount,
+        onboarding_step: 'WAITING_WISHLIST',
+        chat_count: sql`${users.chat_count} + 1`,
+        last_chat_date: new Date()
+      }).where(eq(users.id, user.id));
+      
+      await sendReply(sock, jid, msg, "Sip, dicatet. Terus, lo lagi nabung pengen beli apa nih? (Sebutin barang & harganya, misal: Tiket Konser NIKI 1.5jt)");
+      return;
+    }
+
+    if (user.onboarding_step === 'WAITING_WISHLIST') {
+      const parsed = await parseWishlistWithAI(text);
+
+      let wishlistName = parsed?.item_name || '';
+      let wishlistTarget = parsed?.target_price || 0;
+
+      // Jika Gemini gagal atau tidak dipanggil, gunakan Smart Fallback Regex
+      if (!wishlistName || wishlistTarget <= 0) {
+          // Memisahkan huruf (nama barang) dan sisanya (harga)
+          const match = text.match(/([a-zA-Z\s]+)\s*(.*)/);
+          if (match) {
+              wishlistName = match[1].trim();
+              // Sanitasi harga ala Gen Z
+              let priceText = match[2].toLowerCase().replace(/rp|\s|\./g, '');
+              priceText = priceText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
+              const priceMatch = priceText.match(/\d+/);
+              wishlistTarget = priceMatch ? parseInt(priceMatch[0], 10) : 0;
+          }
+      }
+
+      // Validasi Akhir
+      if (wishlistName && wishlistTarget > 0) {
+          await db.update(users).set({
+            wishlist_name: wishlistName,
+            wishlist_target: wishlistTarget,
+            onboarding_step: 'DONE',
+            chat_count: sql`${users.chat_count} + 1`,
+            last_chat_date: new Date()
+          }).where(eq(users.id, user.id));
+
+          await sendReply(sock, jid, msg, `Oke, target ${wishlistName} Rp ${new Intl.NumberFormat('id-ID').format(wishlistTarget)}. Mulai sekarang, tiap lo jajan atau dapet duit, ketik aja di sini. Kalo lo boros, siap-siap gue gas 💀. Coba tes ketik pengeluaran lo hari ini!`);
+          return;
+      } else {
+          await sendReply(sock, jid, msg, "Eh kurang jelas nih. Sebutin nama barang dan harganya ya, contoh: 'Sepatu 500rb' atau 'PS5 8 juta'.");
+          return;
+      }
+    }
+
+    // AI Engine: Parse ke JSON transaksi
+    const parsed = await parseWithAI(text);
+    logger.info({ parsed }, 'AI parsed result');
 
     if (!parsed || parsed.confidence < 0.5) {
       await sendReply(sock, jid, msg,
@@ -91,6 +188,12 @@ export async function handleIncomingMessage(sock, msg) {
       payment_method: parsed.payment_method || 'unknown',
       raw_input: text,
     });
+
+    // UPDATE KUOTA
+    await db.update(users).set({
+      chat_count: sql`${users.chat_count} + 1`,
+      last_chat_date: new Date()
+    }).where(eq(users.id, user.id));
 
     // Kirim konfirmasi
     const confirmMsg = formatConfirmation(parsed);
@@ -146,8 +249,10 @@ export async function handleIncomingMessage(sock, msg) {
       remainingBudget: remainingBudget,
       monthlyBudget: user.monthly_budget,
       daysLeft: daysLeft,
-      wishlistName: 'Tiket Konser', // TODO: Next MVP
-      wishlistProgress: 30,         // TODO: Next MVP
+      wishlistName: user.wishlist_name || 'Barang Impian',
+      wishlistProgress: user.wishlist_target && user.wishlist_target > 0 
+        ? Math.round((remainingBudget / user.wishlist_target) * 100) 
+        : 0,
     };
 
     const roast = await roastWithAI(roastData);
@@ -290,5 +395,14 @@ function handleWishlistCommand(_jid) {
     '   Kurang: Rp 1.050.000\n' +
     '━━━━━━━━━━━━━━━━━\n' +
     '💪 Semangat nabung, bestie!'
+  );
+}
+
+function handleUpgradeCommand(_jid) {
+  return (
+    'Mau jadi member VIP Cuanly biar chat unlimited? 🔥\n\n' +
+    '1. Scan QRIS/Transfer Rp 15.000 ke Dana: 0812xxxxxx (a.n. Luthfi)\n' +
+    '2. Kirim bukti transfer (screenshot) ke nomor WA Admin: wa.me/628xxxxxx\n\n' +
+    'Nanti akun lo bakal langsung di-upgrade secara manual!'
   );
 }
