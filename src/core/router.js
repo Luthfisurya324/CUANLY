@@ -9,10 +9,6 @@ const logger = createLogger('router');
 
 const SPAM_CACHE = new Map();
 
-/**
- * Pola command yang bisa di-handle tanpa LLM (hemat token).
- * Sesuai Prinsip Cost Optimization dari Prompt Blueprint §4.1
- */
 const COMMAND_HANDLERS = {
   '/saldo':   handleBalanceCommand,
   '/sisa':    handleBalanceCommand,
@@ -23,70 +19,71 @@ const COMMAND_HANDLERS = {
 };
 
 /**
- * Router utama — menerima pesan masuk dan menentukan flow.
- *
- * Pipeline (dari Prompt Blueprint §1):
- *   1. Pre-processing (strip, detect command)
- *   2. Command? → Template response (NO LLM)
- *   3. Natural language? → Gemini parsing → Save DB → Roasting check
- *
- * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @param {import('@whiskeysockets/baileys').WAMessage} msg
+ * Universal Message Processor for both WhatsApp and Telegram
+ * 
+ * @param {string} userId - wa_number for WhatsApp, telegram_id for Telegram
+ * @param {string} platform - 'whatsapp' | 'telegram'
+ * @param {string} text - Message text
+ * @param {string} pushName - Display name (for new users)
+ * @param {Function} replyFn - Async function(text) to send reply
  */
-export async function handleIncomingMessage(sock, msg) {
-  const jid = msg.key.remoteJid;
-  const text = extractText(msg);
-
-  if (!text) return; // Abaikan non-text (gambar, sticker, dll) untuk MVP
+export async function processMessage(userId, platform, text, pushName, replyFn) {
+  if (!text) return;
 
   // ── SPAM FILTER ────────────────────────────────
   const now = Date.now();
-  if (!SPAM_CACHE.has(jid)) {
-    SPAM_CACHE.set(jid, []);
+  const cacheKey = `${platform}:${userId}`;
+  if (!SPAM_CACHE.has(cacheKey)) {
+    SPAM_CACHE.set(cacheKey, []);
   }
-  const timestamps = SPAM_CACHE.get(jid).filter(t => now - t < 5000);
+  const timestamps = SPAM_CACHE.get(cacheKey).filter(t => now - t < 5000);
   timestamps.push(now);
-  SPAM_CACHE.set(jid, timestamps);
+  SPAM_CACHE.set(cacheKey, timestamps);
 
   if (timestamps.length > 3) {
-    logger.warn(`Spam detected from ${jid}`);
+    logger.warn(`Spam detected from ${cacheKey}`);
     return;
   }
 
-  logger.info(`📩 [${jid}]: ${text}`);
+  logger.info(`📩 [${platform}] [${userId}]: ${text}`);
 
-  // ── Step 1: Pre-processing ─────────────────────
   const cleaned = text.trim().toLowerCase();
 
-  // ── Step 2: Check command ──────────────────────
-  const commandHandler = COMMAND_HANDLERS[cleaned];
-  if (commandHandler) {
-    const response = await commandHandler(jid);
-    await sendReply(sock, jid, msg, response);
-    return;
-  }
-
-  // ── Step 3: Natural language → AI Pipeline ─────
   try {
-    // Pastikan user ada di DB
-    let userResult = await db.select().from(users).where(eq(users.wa_number, jid)).limit(1);
+    let userResult;
+    if (platform === 'whatsapp') {
+      userResult = await db.select().from(users).where(eq(users.wa_number, userId)).limit(1);
+    } else {
+      userResult = await db.select().from(users).where(eq(users.telegram_id, userId)).limit(1);
+    }
     let user = userResult[0];
     
     if (!user) {
-      const display_name = msg.pushName || jid.split('@')[0];
+      if (platform === 'telegram') {
+        await replyFn("Lo belum link akun WA lo nih. Ketik /start buat info lebih lanjut.");
+        return;
+      }
+      const display_name = pushName || userId.split('@')[0];
       const inserted = await db.insert(users).values({
-        wa_number: jid,
+        wa_number: userId,
         display_name: display_name,
-        monthly_budget: 0, // Default 0 untuk ditanya nanti
+        monthly_budget: 0,
         onboarding_step: 'ASK_BUDGET'
       }).returning();
       user = inserted[0];
     }
 
+    // ── Step 2: Check command ──────────────────────
+    const commandHandler = COMMAND_HANDLERS[cleaned];
+    if (commandHandler) {
+      const response = await commandHandler(user);
+      await replyFn(response);
+      return;
+    }
+
     // ── QUOTA CHECKER ──────────────────────────────
     const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
     const nowMs = Date.now();
-    // Default fallback if last_reset_date is null (e.g., existing user)
     const lastResetMs = user.last_reset_date ? new Date(user.last_reset_date).getTime() : new Date(user.created_at).getTime();
 
     if (nowMs - lastResetMs >= SEVEN_DAYS_MS) {
@@ -100,7 +97,7 @@ export async function handleIncomingMessage(sock, msg) {
     }
 
     if (user.tier === 'free' && user.chat_count >= 30) {
-      await sendReply(sock, jid, msg, "Jatah chat gratis mingguan lo udah ludes. Lo sanggup jajan puluhan ribu, masa bayar asisten AI 15rb/bulan buat nyelametin dompet lo aja gemeter? 💀 Ketik /upgrade sekarang kalau masih mau gue pantau, atau silakan lanjut halu.");
+      await replyFn("Jatah chat gratis mingguan lo udah ludes. Lo sanggup jajan puluhan ribu, masa bayar asisten AI 15rb/bulan buat nyelametin dompet lo aja gemeter? 💀 Ketik /upgrade sekarang kalau masih mau gue pantau, atau silakan lanjut halu.");
       return;
     }
 
@@ -111,21 +108,18 @@ export async function handleIncomingMessage(sock, msg) {
         chat_count: sql`${users.chat_count} + 1`,
         last_chat_date: new Date()
       }).where(eq(users.id, user.id));
-      await sendReply(sock, jid, msg, "Halo bos! Gue Cuanly, asisten keuangan lo yang anti-basa-basi. Biar gue bisa mantau dompet lo, uang saku/gaji lo bulan ini berapa totalnya?");
+      await replyFn("Halo bos! Gue Cuanly, asisten keuangan lo yang anti-basa-basi. Biar gue bisa mantau dompet lo, uang saku/gaji lo bulan ini berapa totalnya?");
       return;
     }
 
     if (user.onboarding_step === 'WAITING_BUDGET') {
-      // Bersihkan kata 'rp', spasi, dan titik
       let cleanText = text.toLowerCase().replace(/rp|\s|\./g, '');
-      // Konversi singkatan menjadi angka nol
       cleanText = cleanText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
-      // Ekstrak angka yang tersisa
       const match = cleanText.match(/\d+/);
       const amount = match ? parseInt(match[0], 10) : 0;
       
       if (amount <= 0) {
-         await sendReply(sock, jid, msg, "Wah, gw ga ngerti angkanya. Coba ketik yang bener, misal: '1 juta' atau '2000000'");
+         await replyFn("Wah, gw ga ngerti angkanya. Coba ketik yang bener, misal: '1 juta' atau '2000000'");
          return;
       }
 
@@ -136,7 +130,7 @@ export async function handleIncomingMessage(sock, msg) {
         last_chat_date: new Date()
       }).where(eq(users.id, user.id));
       
-      await sendReply(sock, jid, msg, "Sip, dicatet. Terus, lo lagi nabung pengen beli apa nih? (Sebutin barang & harganya, misal: Tiket Konser NIKI 1.5jt)");
+      await replyFn("Sip, dicatet. Terus, lo lagi nabung pengen beli apa nih? (Sebutin barang & harganya, misal: Tiket Konser NIKI 1.5jt)");
       return;
     }
 
@@ -146,13 +140,10 @@ export async function handleIncomingMessage(sock, msg) {
       let wishlistName = parsed?.item_name || '';
       let wishlistTarget = parsed?.target_price || 0;
 
-      // Jika Gemini gagal atau tidak dipanggil, gunakan Smart Fallback Regex
       if (!wishlistName || wishlistTarget <= 0) {
-          // Memisahkan huruf (nama barang) dan sisanya (harga)
           const match = text.match(/([a-zA-Z\s]+)\s*(.*)/);
           if (match) {
               wishlistName = match[1].trim();
-              // Sanitasi harga ala Gen Z
               let priceText = match[2].toLowerCase().replace(/rp|\s|\./g, '');
               priceText = priceText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
               const priceMatch = priceText.match(/\d+/);
@@ -160,7 +151,6 @@ export async function handleIncomingMessage(sock, msg) {
           }
       }
 
-      // Validasi Akhir
       if (wishlistName && wishlistTarget > 0) {
           await db.update(users).set({
             wishlist_name: wishlistName,
@@ -170,10 +160,10 @@ export async function handleIncomingMessage(sock, msg) {
             last_chat_date: new Date()
           }).where(eq(users.id, user.id));
 
-          await sendReply(sock, jid, msg, `Oke, target ${wishlistName} Rp ${new Intl.NumberFormat('id-ID').format(wishlistTarget)}. Mulai sekarang, tiap lo jajan atau dapet duit, ketik aja di sini. Kalo lo boros, siap-siap gue gas 💀. Coba tes ketik pengeluaran lo hari ini!`);
+          await replyFn(`Oke, target ${wishlistName} Rp ${new Intl.NumberFormat('id-ID').format(wishlistTarget)}. Mulai sekarang, tiap lo jajan atau dapet duit, ketik aja di sini. Kalo lo boros, siap-siap gue gas 💀. Coba tes ketik pengeluaran lo hari ini!`);
           return;
       } else {
-          await sendReply(sock, jid, msg, "Eh kurang jelas nih. Sebutin nama barang dan harganya ya, contoh: 'Sepatu 500rb' atau 'PS5 8 juta'.");
+          await replyFn("Eh kurang jelas nih. Sebutin nama barang dan harganya ya, contoh: 'Sepatu 500rb' atau 'PS5 8 juta'.");
           return;
       }
     }
@@ -183,7 +173,7 @@ export async function handleIncomingMessage(sock, msg) {
     logger.info({ parsed }, 'AI parsed result');
 
     if (!parsed || parsed.confidence < 0.5) {
-      await sendReply(sock, jid, msg,
+      await replyFn(
         'Hmm gw bingung 😅 lo mau cek saldo, catat jajan, atau apa?\n' +
         'Coba format: "abis kopi 25rb pake gopay" ✌️'
       );
@@ -196,33 +186,28 @@ export async function handleIncomingMessage(sock, msg) {
 
     console.log('FINAL TYPE DETECTED:', finalType);
 
-    // Simpan transaksi ke database (Supabase)
     await db.insert(transactions).values({
       user_id: user.id,
-      type: finalType, // Dinamis dari Gemini (expense/income)
+      type: finalType,
       amount: parsed.amount,
       category: parsed.category,
       payment_method: parsed.payment_method || 'unknown',
       raw_input: text,
     });
 
-    // UPDATE KUOTA
     await db.update(users).set({
       chat_count: sql`${users.chat_count} + 1`,
       last_chat_date: new Date()
     }).where(eq(users.id, user.id));
 
-    // Kirim konfirmasi
     const confirmMsg = formatConfirmation(parsed);
-    await sendReply(sock, jid, msg, confirmMsg);
+    await replyFn(confirmMsg);
 
-    // Logika Roasting: Skip untuk Pemasukan
     if (isIncome) {
-      await sendReply(sock, jid, msg, 'Wah mantap bos dapet duit! Udah gue masukin ke saldo ya. Jangan foya-foya! 💸');
+      await replyFn('Wah mantap bos dapet duit! Udah gue masukin ke saldo ya. Jangan foya-foya! 💸');
       return;
     }
 
-    // Hitung sisa budget bulan ini
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
@@ -252,12 +237,10 @@ export async function handleIncomingMessage(sock, msg) {
     const effectiveBudget = user.monthly_budget + totalIncome;
     const remainingBudget = effectiveBudget - totalSpent;
 
-    // Hitung sisa hari dalam bulan ini
-    const now = new Date();
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const daysLeft = endOfMonth.getDate() - now.getDate();
+    const nowD = new Date();
+    const endOfMonth = new Date(nowD.getFullYear(), nowD.getMonth() + 1, 0);
+    const daysLeft = endOfMonth.getDate() - nowD.getDate();
 
-    // AI Engine 2: Groq → Roasting (jika trigger terpenuhi)
     const roastData = {
       userName: user.display_name || user.wa_number.split('@')[0],
       description: parsed.description,
@@ -274,24 +257,37 @@ export async function handleIncomingMessage(sock, msg) {
 
     const roast = await roastWithAI(roastData);
     if (roast) {
-      await sendReply(sock, jid, msg, roast);
+      await replyFn(roast);
     }
 
   } catch (err) {
     logger.error(err, 'AI Pipeline error');
-    await sendReply(sock, jid, msg,
-      'Waduh, otak AI gw lagi error bentar 😵 Coba lagi ya bestie!'
-    );
+    await replyFn('Waduh, otak AI gw lagi error bentar 😵 Coba lagi ya bestie!');
   }
+}
+
+/**
+ * Adapter untuk WhatsApp message (Backward compatibility)
+ */
+export async function handleIncomingMessage(sock, msg) {
+  const jid = msg.key.remoteJid;
+  const text = extractText(msg);
+  const pushName = msg.pushName;
+  
+  if (!text) return;
+
+  const replyFn = async (replyText) => {
+    await sock.sendMessage(jid, { text: replyText }, { quoted: msg });
+    logger.info(`📤 [WA] [${jid}]: ${replyText.substring(0, 80)}...`);
+  };
+
+  return processMessage(jid, 'whatsapp', text, pushName, replyFn);
 }
 
 // ═══════════════════════════════════════════════
 //  Helper Functions
 // ═══════════════════════════════════════════════
 
-/**
- * Ekstrak text dari berbagai jenis pesan WA.
- */
 function extractText(msg) {
   return (
     msg.message?.conversation ||
@@ -301,17 +297,6 @@ function extractText(msg) {
   );
 }
 
-/**
- * Kirim reply dengan quote ke pesan asli.
- */
-async function sendReply(sock, jid, quotedMsg, text) {
-  await sock.sendMessage(jid, { text }, { quoted: quotedMsg });
-  logger.info(`📤 [${jid}]: ${text.substring(0, 80)}...`);
-}
-
-/**
- * Format konfirmasi transaksi yang sudah di-parse.
- */
 function formatConfirmation(parsed) {
   const amount = new Intl.NumberFormat('id-ID').format(parsed.amount);
   const payment = parsed.payment_method !== 'unknown'
@@ -329,14 +314,7 @@ function formatConfirmation(parsed) {
 //  Command Handlers (No LLM — Template Response)
 // ═══════════════════════════════════════════════
 
-async function handleBalanceCommand(jid) {
-  let userResult = await db.select().from(users).where(eq(users.wa_number, jid)).limit(1);
-  let user = userResult[0];
-  
-  if (!user) {
-    return 'Belum ada data nih bos. Coba catat transaksi pertamamu dulu!';
-  }
-
+async function handleBalanceCommand(user) {
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
@@ -368,7 +346,7 @@ async function handleBalanceCommand(jid) {
 
   const now = new Date();
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const daysLeft = endOfMonth.getDate() - now.getDate() || 1; // Cegah division by zero
+  const daysLeft = endOfMonth.getDate() - now.getDate() || 1; 
   const dailyBudget = Math.floor(remainingBudget / daysLeft);
 
   const formatRp = (num) => new Intl.NumberFormat('id-ID').format(num);
@@ -385,7 +363,7 @@ async function handleBalanceCommand(jid) {
   );
 }
 
-function handleHelpCommand(_jid) {
+function handleHelpCommand(_user) {
   return (
     '🤖 *Cuanly — Bantuan*\n' +
     '━━━━━━━━━━━━━━━━━\n\n' +
@@ -401,21 +379,17 @@ function handleHelpCommand(_jid) {
   );
 }
 
-function handleWishlistCommand(_jid) {
-  // TODO: Ambil wishlist dari database
+function handleWishlistCommand(user) {
   return (
     '🎯 *Wishlist Kamu*\n' +
     '━━━━━━━━━━━━━━━━━\n' +
-    '🎵 Tiket Konser — Rp 1.500.000\n' +
-    '   Progress: ████░░░░░░ 30%\n' +
-    '   Terkumpul: Rp 450.000\n' +
-    '   Kurang: Rp 1.050.000\n' +
+    `🎵 ${user.wishlist_name || 'Target'} — Rp ${new Intl.NumberFormat('id-ID').format(user.wishlist_target || 0)}\n` +
     '━━━━━━━━━━━━━━━━━\n' +
     '💪 Semangat nabung, bestie!'
   );
 }
 
-function handleUpgradeCommand(_jid) {
+function handleUpgradeCommand(_user) {
   return (
     'Mau jadi member VIP Cuanly biar chat unlimited? 🔥\n\n' +
     '1. Scan QRIS/Transfer Rp 15.000 ke Dana: 0812xxxxxx (a.n. Luthfi)\n' +
@@ -424,12 +398,12 @@ function handleUpgradeCommand(_jid) {
   );
 }
 
-async function handleMigrasiCommand(jid) {
+async function handleMigrasiCommand(user) {
   try {
     const uniqueCode = crypto.randomBytes(4).toString('hex');
     await db.update(users)
       .set({ migration_code: uniqueCode })
-      .where(eq(users.wa_number, jid));
+      .where(eq(users.id, user.id));
 
     return (
       `Kode migrasi lo udah siap, bos.\n\n` +

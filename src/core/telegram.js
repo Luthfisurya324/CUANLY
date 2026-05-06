@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { users } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
+import { processMessage } from './router.js';
 
 const logger = createLogger('telegram');
 
@@ -55,6 +56,23 @@ export function startTelegramBot() {
       logger.error(error, "Error saat handling /link command");
       return ctx.reply("Waduh, otak gue lagi error. Coba lagi bentar ya.");
     }
+  });
+
+  // Handle all other text messages
+  bot.on('text', async (ctx) => {
+    // Abaikan command start dan link yang sudah di-handle di atas
+    if (ctx.message.text.startsWith('/start') || ctx.message.text.startsWith('/link')) return;
+
+    const telegramId = ctx.from.id.toString();
+    const text = ctx.message.text;
+    const pushName = ctx.from.first_name || 'Bos';
+
+    const replyFn = async (replyText) => {
+      await ctx.reply(replyText, { reply_to_message_id: ctx.message.message_id });
+      logger.info(`📤 [TG] [${telegramId}]: ${replyText.substring(0, 80)}...`);
+    };
+
+    await processMessage(telegramId, 'telegram', text, pushName, replyFn);
   });
 
   // Handle errors global

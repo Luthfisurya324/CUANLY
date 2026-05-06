@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createLogger } from './utils/logger.js';
 import { startWhatsApp } from './core/whatsapp.js';
+import { startTelegramBot } from './core/telegram.js';
 
 const logger = createLogger('main');
 
@@ -36,6 +37,9 @@ async function main() {
     logger.warn(`⚠️  Missing env vars: ${missing.join(', ')}`);
     logger.warn('   Bot tetap jalan, tapi AI features akan pakai fallback.');
   }
+
+  // Start Telegram Bot
+  startTelegramBot();
 
   // Start WhatsApp connection
   await startWhatsApp();
