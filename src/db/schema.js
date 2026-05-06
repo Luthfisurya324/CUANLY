@@ -3,6 +3,8 @@ import { pgTable, uuid, varchar, integer, text, timestamp } from 'drizzle-orm/pg
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   wa_number: varchar('wa_number', { length: 50 }).notNull().unique(),
+  telegram_id: varchar('telegram_id', { length: 255 }).unique(),
+  migration_code: varchar('migration_code', { length: 8 }).unique(),
   display_name: varchar('display_name', { length: 100 }),
   monthly_budget: integer('monthly_budget').default(0).notNull(), // As default temporary budget
   onboarding_step: varchar('onboarding_step', { length: 20 }).default('ASK_BUDGET').notNull(),

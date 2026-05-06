@@ -3,6 +3,7 @@ import { parseWithAI, parseWishlistWithAI, roastWithAI } from '../services/ai.js
 import { db } from '../db/index.js';
 import { users, transactions } from '../db/schema.js';
 import { eq, and, gte, sql } from 'drizzle-orm';
+import crypto from 'crypto';
 
 const logger = createLogger('router');
 
@@ -18,6 +19,7 @@ const COMMAND_HANDLERS = {
   '/help':    handleHelpCommand,
   '/wishlist': handleWishlistCommand,
   '/upgrade': handleUpgradeCommand,
+  '/migrasi': handleMigrasiCommand,
 };
 
 /**
@@ -420,4 +422,24 @@ function handleUpgradeCommand(_jid) {
     '2. Kirim bukti transfer (screenshot) ke nomor WA Admin: wa.me/628xxxxxx\n\n' +
     'Nanti akun lo bakal langsung di-upgrade secara manual!'
   );
+}
+
+async function handleMigrasiCommand(jid) {
+  try {
+    const uniqueCode = crypto.randomBytes(4).toString('hex');
+    await db.update(users)
+      .set({ migration_code: uniqueCode })
+      .where(eq(users.wa_number, jid));
+
+    return (
+      `Kode migrasi lo udah siap, bos.\n\n` +
+      `Key: *${uniqueCode}*\n\n` +
+      `Kode ini cuma punya lo seorang. Kalau WA ini mendadak mokad, cari gue di Telegram @CuanlyBot dan ketik:\n\n` +
+      `/link ${uniqueCode}\n\n` +
+      `Jaga baik-baik, jangan dikasih ke siapa-siapa kalau nggak mau ketahuan lo sering jajan boncos.`
+    );
+  } catch (error) {
+    logger.error("Gagal generate kode migrasi:", error);
+    return "Aduh database gue lagi ngambek. Coba lagi bentar ya.";
+  }
 }

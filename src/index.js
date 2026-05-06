@@ -10,8 +10,8 @@ const logger = createLogger('main');
  * ============================================
  *
  * Dual-AI Engine:
- *   1. Gemini  → Parse natural language → JSON transaksi
- *   2. Groq    → Generate roasting Gen Z yang viral
+ *   1. Chutes  → Parse natural language → JSON transaksi
+ *   2. Chutes  → Generate roasting Gen Z yang viral
  *
  * Arsitektur:
  *   src/
