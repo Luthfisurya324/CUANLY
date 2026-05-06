@@ -11,6 +11,7 @@ export const users = pgTable('users', {
   tier: text('tier').default('free').notNull(),
   chat_count: integer('chat_count').default(0).notNull(),
   last_chat_date: timestamp('last_chat_date'),
+  last_reset_date: timestamp('last_reset_date').defaultNow().notNull(),
   created_at: timestamp('created_at').defaultNow().notNull(),
 });
 

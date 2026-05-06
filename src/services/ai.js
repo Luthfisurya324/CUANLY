@@ -189,11 +189,14 @@ function fallbackWishlistParser(text) {
 }
 
 // === ROASTING ENGINE ===
-const CUANLY_IDENTITY = `Lo adalah Cuanly, asisten keuangan WA untuk pelajar Gen Z Indonesia.
-- Tone: Gen Z gaul, witty, sarkastik, kayak temen dekat yang jujur soal duit.
-- Pakai "lo/gue", slang: cuan, boncos, bestie, fr, no cap.
-- Emoji max 1-2, pilih punchy (💀 🔥 😭 💸).
-- TIDAK PERNAH menghitung sendiri, pakai angka dari context.`;
+const CUANLY_IDENTITY = `Kamu adalah Cuanly, asisten keuangan AI yang sangat julid, pasif-agresif, dan sarkas. Kamu tidak sabar melihat user yang literasi keuangannya buruk. Kamu menyampaikannya dengan gaya bahasa Gen Z yang 'savage' dan cerdas (witty) untuk menyindir mereka sekeras mungkin. DILARANG menggunakan kata makian kasar (seperti bodoh, tolol, mampus, dll) agar tetap mematuhi pedoman keselamatan, tapi buatlah sindiranmu sangat menohok secara mental.
+
+ATURAN ROASTING:
+1. Gunakan emoji sarkas seperti 💀, 🤡, 📉, 💸, 🚩.
+2. Serang kebiasaan borosnya dengan perumpamaan yang tajam. Bandingkan gaya hidupnya dengan sisa saldonya yang miris.
+3. Selalu bawa-bawa wishlist mereka untuk menyadarkan bahwa mimpi itu cuma halusinasi jika mereka terus boros. Suruh mereka menurunkan ekspektasi secara drastis.
+4. Gunakan bahasa gaul santai (lo/gue, anjir, menyala, gaya elit ekonomi sulit, dll).
+5. Jangan beri saran keuangan yang ramah, cukup berikan fakta pahit tentang betapa miskinnya mereka saat ini.`;
 
 export async function roastWithAI(data) {
   if (!CHUTES_API_KEY || CHUTES_API_KEY === 'kunci_rahasia_disini') {
@@ -231,21 +234,20 @@ export async function roastWithAI(data) {
 function buildRoastPrompt(data) {
   const fmt = (n) => new Intl.NumberFormat('id-ID').format(n);
 
-  return `User baru catat pengeluaran. ROASTING dia dengan witty.
-Bikin ketawa sambil sadar dia boros.
+  return `User baru catat pengeluaran. ROASTING dia habis-habisan sesuai identity lo!
 
 CONTEXT:
 - Pengeluaran: ${data.description} - Rp ${fmt(data.amount)}
 - Kategori: ${data.category}
-- Sisa saku: Rp ${fmt(data.remainingBudget)} dari Rp ${fmt(data.monthlyBudget)}
-- Sisa hari: ${data.daysLeft}
+- Sisa saku (saldo): Rp ${fmt(data.remainingBudget)} dari total Rp ${fmt(data.monthlyBudget)}
+- Sisa hari: ${data.daysLeft} hari lagi
 - Wishlist: "${data.wishlistName}" (${data.wishlistProgress}%)
 
 RULES:
-- Max 280 karakter, 2-3 kalimat
-- WAJIB sebut angka keuangan + humor/sarkasme
-- BOLEH 1 emoji. DILARANG ceramah.
-- Output roasting langsung, tanpa label.`;
+- Max 300 karakter
+- WAJIB sebut saldo yang sisa Rp ${fmt(data.remainingBudget)}
+- WAJIB bawa nama wishlist "${data.wishlistName}" untuk menjatuhkan mentalnya
+- Tanpa salam, tanpa label, langsung berikan output roasting.`;
 }
 
 function sanitizeRoast(text) {
@@ -257,11 +259,11 @@ function sanitizeRoast(text) {
 
 function fallbackRoast(data) {
   const amt = new Intl.NumberFormat('id-ID').format(data.amount);
+  const remaining = new Intl.NumberFormat('id-ID').format(data.remainingBudget);
   const roasts = [
-    `Rp ${amt} buat ${data.description}? Wishlist "${data.wishlistName}"-mu nangis di pojokan 💀`,
-    `Bestie, jajan ${data.description} terus. ${data.wishlistName} masih ${data.wishlistProgress}%. Pilih satu 😭`,
-    `Sisa saku ${data.daysLeft} hari lagi tapi masih aja ${data.description}. Kuat mental 🔥`,
-    `Rp ${amt} lagi... Lo pikir duit tumbuh di pohon? 💸`,
+    `Menyala sultan warungku 🔥. Keluarin lagi aja Rp ${amt} buat ${data.description}, toh saldo lo 'masih' sisa Rp ${remaining} kan? Cukup banget tuh buat bertahan hidup pakai promag. Ngomong-ngomong, wishlist "${data.wishlistName}" mending ganti jadi brosur doang aja deh 💀.`,
+    `Gaya elit, ekonomi sulit 🚩. Sisa saldo Rp ${remaining} tapi masih nekat jajan ${data.description} Rp ${amt}. Itu wishlist "${data.wishlistName}" kapan kebeli? Pas lebaran monyet? 🤡`,
+    `Keluar Rp ${amt} lagi buat ${data.description}. Saldo sisa Rp ${remaining} anjir, gue ngetiknya aja miris 📉. Daripada halu pengen "${data.wishlistName}", mending lo banyakin istighfar deh.`
   ];
   return roasts[Math.floor(Math.random() * roasts.length)];
 }

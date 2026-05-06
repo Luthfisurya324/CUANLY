@@ -82,8 +82,23 @@ export async function handleIncomingMessage(sock, msg) {
     }
 
     // ── QUOTA CHECKER ──────────────────────────────
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    // Default fallback if last_reset_date is null (e.g., existing user)
+    const lastResetMs = user.last_reset_date ? new Date(user.last_reset_date).getTime() : new Date(user.created_at).getTime();
+
+    if (nowMs - lastResetMs >= SEVEN_DAYS_MS) {
+      await db.update(users).set({
+        chat_count: 0,
+        last_reset_date: new Date()
+      }).where(eq(users.id, user.id));
+      
+      user.chat_count = 0;
+      user.last_reset_date = new Date();
+    }
+
     if (user.tier === 'free' && user.chat_count >= 30) {
-      await sendReply(sock, jid, msg, "Kuota gratis lo bulan ini udah abis bos! Biar gue tetep bisa nyatet dan ngeroast lo, yuk upgrade ke Premium (Rp 15.000/bulan). Ketik /upgrade buat info lanjut! 💸");
+      await sendReply(sock, jid, msg, "Jatah chat gratis mingguan lo udah ludes. Lo sanggup jajan puluhan ribu, masa bayar asisten AI 15rb/bulan buat nyelametin dompet lo aja gemeter? 💀 Ketik /upgrade sekarang kalau masih mau gue pantau, atau silakan lanjut halu.");
       return;
     }
 
