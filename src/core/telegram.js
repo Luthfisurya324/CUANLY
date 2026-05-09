@@ -80,9 +80,22 @@ export function startTelegramBot() {
     logger.error(err, `Error untuk update type ${ctx.updateType}`);
   });
 
-  bot.launch()
-    .then(() => logger.info('🤖 Cuanly Telegram Bot is running!'))
-    .catch((err) => logger.error(err, 'Gagal menjalankan Telegram bot'));
+  const launchBot = async (retries = 10) => {
+    try {
+      await bot.launch({ dropPendingUpdates: true });
+      logger.info('🤖 Cuanly Telegram Bot is running!');
+    } catch (err) {
+      logger.error(err.message || err, `Gagal menjalankan Telegram bot. Sisa percobaan: ${retries}`);
+      if (retries > 0) {
+        logger.info('⏳ Mencoba ulang koneksi Telegram dalam 10 detik...');
+        setTimeout(() => launchBot(retries - 1), 10000);
+      } else {
+        logger.error('💀 Telegram bot menyerah (Gagal konek ke API Telegram). Pastikan token valid.');
+      }
+    }
+  };
+
+  launchBot();
 
   // Enable graceful stop
   process.once('SIGINT', () => bot.stop('SIGINT'));

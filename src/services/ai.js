@@ -7,10 +7,68 @@ const CHUTES_API_KEY = process.env.CHUTES_API_KEY;
 const CHUTES_BASE_URL = process.env.CHUTES_BASE_URL || 'https://api.chutes.ai/v1';
 const CHUTES_MODEL = process.env.CHUTES_MODEL || 'Qwen/Qwen2.5-32B-Instruct';
 
+// Client untuk Chutes (Roasting)
 const openai = new OpenAI({
   apiKey: CHUTES_API_KEY,
   baseURL: CHUTES_BASE_URL,
 });
+
+// Client untuk Vision (OpenRouter - Gratis & Banyak Model)
+const visionAI = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY || 'dummy_key',
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+// === RECEIPT EXTRACTION ===
+const RECEIPT_PROMPT = `Kamu adalah ekstraktor data struk belanja. Analisis foto struk ini. Ekstrak informasi berikut dan kembalikan HANYA dalam format JSON murni tanpa markdown/backticks: { "total_amount": (integer tanpa titik/koma), "category": (pilih salah satu: Makanan/Transport/Hiburan/Belanja/Lainnya), "items": (string ringkasan barang yang dibeli max 10 kata) }`;
+
+export async function analyzeReceipt(imageBuffer, mimeType) {
+  if (!process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY === 'dummy_key') {
+    logger.warn('OPENROUTER_API_KEY tidak ada. Receipt analysis gagal.');
+    return null;
+  }
+  
+  try {
+    const base64Image = imageBuffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64Image}`;
+    const response = await visionAI.chat.completions.create({
+      model: "google/gemini-2.0-flash-lite-preview-02-05:free",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: RECEIPT_PROMPT },
+            { type: "image_url", image_url: { url: dataUrl } }
+          ]
+        }
+      ],
+      temperature: 0.1
+    });
+
+    const responseText = response.choices[0].message.content.trim();
+    
+    logger.info({ raw_vision: responseText }, 'Raw Vision Response');
+
+    // Extract JSON using regex
+    const match = responseText.match(/\{[\s\S]*\}/);
+    if (!match) {
+       logger.error('No JSON object found in Vision response');
+       return null;
+    }
+    
+    const parsed = JSON.parse(match[0]);
+    logger.info({ parsed }, 'AI Vision Receipt success');
+    return parsed;
+  } catch (err) {
+    logger.error(err, 'AI Vision error');
+    
+    if (err.status === 429 || err.message?.includes('429')) {
+      return 'QUOTA_EXCEEDED';
+    }
+    
+    return null;
+  }
+}
 
 // === TRANSACTION EXTRACTION ===
 const VALID_CATEGORIES = [

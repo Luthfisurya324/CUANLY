@@ -15,6 +15,8 @@ export const users = pgTable('users', {
   last_chat_date: timestamp('last_chat_date'),
   last_reset_date: timestamp('last_reset_date').defaultNow().notNull(),
   created_at: timestamp('created_at').defaultNow().notNull(),
+  pin: varchar('pin', { length: 6 }),
+  web_token: varchar('web_token', { length: 64 }),
 });
 
 export const transactions = pgTable('transactions', {
@@ -26,4 +28,9 @@ export const transactions = pgTable('transactions', {
   payment_method: varchar('payment_method', { length: 50 }),
   raw_input: text('raw_input'),
   created_at: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const baileys_auth = pgTable('baileys_auth', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  data: text('data').notNull(),
 });

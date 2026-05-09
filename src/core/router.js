@@ -1,9 +1,10 @@
 import { createLogger } from '../utils/logger.js';
-import { parseWithAI, parseWishlistWithAI, roastWithAI } from '../services/ai.js';
+import { parseWithAI, parseWishlistWithAI, roastWithAI, analyzeReceipt } from '../services/ai.js';
 import { db } from '../db/index.js';
 import { users, transactions } from '../db/schema.js';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import crypto from 'crypto';
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
 
 const logger = createLogger('router');
 
@@ -16,6 +17,7 @@ const COMMAND_HANDLERS = {
   '/wishlist': handleWishlistCommand,
   '/upgrade': handleUpgradeCommand,
   '/migrasi': handleMigrasiCommand,
+  '/web':     handleWebCommand,
 };
 
 /**
@@ -27,8 +29,8 @@ const COMMAND_HANDLERS = {
  * @param {string} pushName - Display name (for new users)
  * @param {Function} replyFn - Async function(text) to send reply
  */
-export async function processMessage(userId, platform, text, pushName, replyFn) {
-  if (!text) return;
+export async function processMessage(userId, platform, text, pushName, replyFn, mediaData = null) {
+  if (!text && !mediaData) return;
 
   // ── SPAM FILTER ────────────────────────────────
   const now = Date.now();
@@ -47,7 +49,7 @@ export async function processMessage(userId, platform, text, pushName, replyFn) 
 
   logger.info(`📩 [${platform}] [${userId}]: ${text}`);
 
-  const cleaned = text.trim().toLowerCase();
+  const cleaned = (text || '').trim().toLowerCase();
 
   try {
     let userResult;
@@ -97,7 +99,15 @@ export async function processMessage(userId, platform, text, pushName, replyFn) 
     }
 
     if (user.tier === 'free' && user.chat_count >= 30) {
-      await replyFn("Jatah chat gratis mingguan lo udah ludes. Lo sanggup jajan puluhan ribu, masa bayar asisten AI 15rb/bulan buat nyelametin dompet lo aja gemeter? 💀 Ketik /upgrade sekarang kalau masih mau gue pantau, atau silakan lanjut halu.");
+      const upgradeMsg = `🚨 *LIMIT MINGGUAN LO UDAH HABIS, BOS!* 🚨
+
+Gaya selangit, jajan puluhan ribu lancar, giliran invest Rp15.000/bulan buat nyelametin dompet sendiri aja mendadak miskin? 💀💅
+
+Jatah 30 chat gratis lo minggu ini udah ludes. Mulai detik ini gue mogok nyatet pengeluaran lo.
+
+Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, silakan lanjut halu jadi crazy rich sampai saldo lo beneran koma. Bye! 👋💸`;
+      
+      await replyFn(upgradeMsg);
       return;
     }
 
@@ -113,7 +123,7 @@ export async function processMessage(userId, platform, text, pushName, replyFn) 
     }
 
     if (user.onboarding_step === 'WAITING_BUDGET') {
-      let cleanText = text.toLowerCase().replace(/rp|\s|\./g, '');
+      let cleanText = (text || '').toLowerCase().replace(/rp|\s|\./g, '');
       cleanText = cleanText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
       const match = cleanText.match(/\d+/);
       const amount = match ? parseInt(match[0], 10) : 0;
@@ -135,7 +145,7 @@ export async function processMessage(userId, platform, text, pushName, replyFn) 
     }
 
     if (user.onboarding_step === 'WAITING_WISHLIST') {
-      const parsed = await parseWishlistWithAI(text);
+      const parsed = await parseWishlistWithAI(text || '');
 
       let wishlistName = parsed?.item_name || '';
       let wishlistTarget = parsed?.target_price || 0;
@@ -168,9 +178,49 @@ export async function processMessage(userId, platform, text, pushName, replyFn) 
       }
     }
 
-    // AI Engine: Parse ke JSON transaksi
-    const parsed = await parseWithAI(text);
-    logger.info({ parsed }, 'AI parsed result');
+    let parsed = null;
+    let isReceipt = false;
+
+    if (mediaData) {
+      await replyFn("Mata gue lagi nyecan struk lo, sabar...");
+      const receiptData = await analyzeReceipt(mediaData.buffer, mediaData.mimetype);
+      
+      logger.info({ receiptData }, 'Data hasil scan struk');
+
+      if (receiptData === 'QUOTA_EXCEEDED') {
+        await replyFn("Waduh bos, limit API Google Gemini gue lagi abis (Quota Exceeded 429). Coba lagi besok atau upgrade API key lo ya!");
+        return;
+      }
+
+      if (!receiptData) {
+        await replyFn("Ini foto apaan bos? Buram atau bukan struk nih. Ulangi yang bener fotonya!");
+        return;
+      }
+      
+      const amount = receiptData.total_amount || receiptData.totalAmount || receiptData.amount;
+      const items = receiptData.items || receiptData.item || receiptData.description || 'Barang belanjaan';
+      let category = receiptData.category || 'lainnya';
+
+      if (!amount) {
+        await replyFn("Struk kebaca sih, tapi gue nggak nemu total harganya. Ulangi fotonya yang jelas di bagian Total/Grand Total!");
+        return;
+      }
+      
+      isReceipt = true;
+      parsed = {
+        type: 'expense',
+        amount: Number(amount),
+        category: category.toLowerCase(),
+        description: items,
+        payment_method: 'unknown',
+        confidence: 1.0,
+      };
+      logger.info({ parsed }, 'AI Receipt parsed result');
+    } else {
+      // AI Engine: Parse ke JSON transaksi
+      parsed = await parseWithAI(text || '');
+      logger.info({ parsed }, 'AI parsed result');
+    }
 
     if (!parsed || parsed.confidence < 0.5) {
       await replyFn(
@@ -192,7 +242,7 @@ export async function processMessage(userId, platform, text, pushName, replyFn) 
       amount: parsed.amount,
       category: parsed.category,
       payment_method: parsed.payment_method || 'unknown',
-      raw_input: text,
+      raw_input: text || 'IMAGE_RECEIPT',
     });
 
     await db.update(users).set({
@@ -200,8 +250,13 @@ export async function processMessage(userId, platform, text, pushName, replyFn) 
       last_chat_date: new Date()
     }).where(eq(users.id, user.id));
 
-    const confirmMsg = formatConfirmation(parsed);
-    await replyFn(confirmMsg);
+    if (isReceipt) {
+      const amountFmt = new Intl.NumberFormat('id-ID').format(parsed.amount);
+      await replyFn(`Udah gue catat boncos lo Rp ${amountFmt} buat ${parsed.description}.`);
+    } else {
+      const confirmMsg = formatConfirmation(parsed);
+      await replyFn(confirmMsg);
+    }
 
     if (isIncome) {
       await replyFn('Wah mantap bos dapet duit! Udah gue masukin ke saldo ya. Jangan foya-foya! 💸');
@@ -274,14 +329,34 @@ export async function handleIncomingMessage(sock, msg) {
   const text = extractText(msg);
   const pushName = msg.pushName;
   
-  if (!text) return;
+  const isImage = !!(msg.message?.imageMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage);
+  
+  if (!text && !isImage) return;
 
   const replyFn = async (replyText) => {
     await sock.sendMessage(jid, { text: replyText }, { quoted: msg });
     logger.info(`📤 [WA] [${jid}]: ${replyText.substring(0, 80)}...`);
   };
 
-  return processMessage(jid, 'whatsapp', text, pushName, replyFn);
+  let mediaData = null;
+  if (isImage) {
+    const imageMsg = msg.message?.imageMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
+    if (imageMsg) {
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger: sock.logger, reuploadRequest: sock.updateMediaMessage });
+        mediaData = {
+          buffer,
+          mimetype: imageMsg.mimetype || 'image/jpeg'
+        };
+      } catch (e) {
+        logger.error(e, 'Failed to download media');
+        await replyFn('Gagal download gambar lo. Coba kirim ulang.');
+        return;
+      }
+    }
+  }
+
+  return processMessage(jid, 'whatsapp', text, pushName, replyFn, mediaData);
 }
 
 // ═══════════════════════════════════════════════
@@ -365,27 +440,62 @@ async function handleBalanceCommand(user) {
 
 function handleHelpCommand(_user) {
   return (
-    '🤖 *Cuanly — Bantuan*\n' +
-    '━━━━━━━━━━━━━━━━━\n\n' +
-    '📝 *Catat pengeluaran:*\n' +
-    '   Ketik aja natural, contoh:\n' +
-    '   "abis ngopi 25rb pake gopay"\n' +
-    '   "beli seblak 15k dana"\n\n' +
-    '💰 *Cek saldo:*\n' +
-    '   /saldo atau /sisa\n\n' +
-    '🎯 *Lihat wishlist:*\n' +
-    '   /wishlist\n\n' +
-    '💡 Tips: Ngetik aja kayak chat temen. Cuanly ngerti kok! 😎'
+    '🤖 *Pusat Bantuan Cuanly* 📉\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n' +
+    'Gue tau lo males baca, jadi gue persingkat aja biar lo cepet sadar diri.\n\n' +
+    '💸 *CARA NYATET BONCOS*\n' +
+    'Ngetik aja senatural mungkin, nggak usah kaku kayak ngomong sama dosen:\n' +
+    '> "Jajan ketoprak sultan 25k"\n' +
+    '> "Isi bensin 50rb pake gopay"\n' +
+    '> "Dapet arisan 2jt" (jarang-jarang kan lo begini)\n\n' +
+    '🛠️ *COMMAND SAKTI*\n' +
+    '▪️ */saldo* : Cek sisa napas dompet lo bulan ini.\n' +
+    '▪️ */wishlist* : Liat progress barang impian vs realita.\n' +
+    '▪️ */web* : 🌐 [BARU!] Buka dashboard rahasia buat liat grafik dosa finansial lo.\n' +
+    '▪️ */migrasi* : 🛟 Bikin kode sekoci kalau WA ini mendadak diblokir Meta.\n\n' +
+    '💡 *Pro-Tip:* Nggak usah baper kalau gue roast tiap lo jajan. Tujuan gue murni biar dompet lo selamat sampai akhir bulan. 🚩'
   );
 }
 
-function handleWishlistCommand(user) {
+async function handleWishlistCommand(user) {
+  if (!user.wishlist_target || !user.wishlist_name) {
+    return "Lo aja belum punya target impian bos! Mau nabung buat apa? Karet gelang?\nKetik nama barang & harganya kalau mau dibuatin wishlist, contoh: 'Sepatu 500rb'.";
+  }
+
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const expenseResult = await db.select({ total: sql`sum(amount)` })
+    .from(transactions)
+    .where(and(eq(transactions.user_id, user.id), eq(transactions.type, 'expense'), gte(transactions.created_at, startOfMonth)));
+  const totalSpent = Number(expenseResult[0]?.total || 0);
+
+  const incomeResult = await db.select({ total: sql`sum(amount)` })
+    .from(transactions)
+    .where(and(eq(transactions.user_id, user.id), eq(transactions.type, 'income'), gte(transactions.created_at, startOfMonth)));
+  const totalIncome = Number(incomeResult[0]?.total || 0);
+
+  const saved = Math.max(0, totalIncome - totalSpent);
+  const pct = Math.min(100, Math.round((saved / user.wishlist_target) * 100));
+
+  const formatRp = (num) => new Intl.NumberFormat('id-ID').format(num);
+
+  let roastMsg = "";
+  if (pct === 0) roastMsg = "Nol besar! Pemasukan lo habis dimakan gaya hidup. Kapan bisa belinya bos?";
+  else if (pct < 30) roastMsg = "Baru sekecil ini gaya lo udah selangit. Kurangin nongkrong!";
+  else if (pct < 80) roastMsg = "Udah lumayan, tapi jangan cepet puas. Awas aja tiba-tiba lo check out barang gajelas.";
+  else if (pct < 100) roastMsg = "Dikit lagi! Tahan napsu, jangan goyah sama diskonan nggak penting.";
+  else roastMsg = "Wih, tembus juga target lo! Keren juga lo ternyata, gue kira cuma jago ngutang.";
+
   return (
-    '🎯 *Wishlist Kamu*\n' +
-    '━━━━━━━━━━━━━━━━━\n' +
-    `🎵 ${user.wishlist_name || 'Target'} — Rp ${new Intl.NumberFormat('id-ID').format(user.wishlist_target || 0)}\n` +
-    '━━━━━━━━━━━━━━━━━\n' +
-    '💪 Semangat nabung, bestie!'
+    '🎯 *Realita vs Ekspektasi*\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n' +
+    `🎵 Impian   : ${user.wishlist_name}\n` +
+    `💸 Harga    : Rp ${formatRp(user.wishlist_target)}\n` +
+    `📈 Tabungan : Rp ${formatRp(saved)} (${pct}%)\n` +
+    '━━━━━━━━━━━━━━━━━━━━\n' +
+    `🔥 *Cuanly Says:*\n${roastMsg}`
   );
 }
 
@@ -415,5 +525,29 @@ async function handleMigrasiCommand(user) {
   } catch (error) {
     logger.error("Gagal generate kode migrasi:", error);
     return "Aduh database gue lagi ngambek. Coba lagi bentar ya.";
+  }
+}
+
+async function handleWebCommand(user) {
+  try {
+    // Generate a secure 32-byte hex token as the magic link
+    const token = crypto.randomBytes(32).toString('hex');
+
+    await db.update(users)
+      .set({ web_token: token })
+      .where(eq(users.id, user.id));
+
+    const magicUrl = `https://cuanlybot.vercel.app/auth/${token}`;
+
+    return (
+      `Mau liat rapor merah keuangan lo? 📊\n\n` +
+      `Klik link ini buat masuk ke dashboard:\n` +
+      `👉 ${magicUrl}\n\n` +
+      `Link berlaku terus sampai lo minta yang baru lagi pake /web.\n` +
+      `Jangan kasih link ini ke siapapun ya bos. 🔐`
+    );
+  } catch (error) {
+    logger.error("Gagal generate magic link:", error);
+    return "Waduh gagal bikin link. Database lagi ngambek, coba lagi bentar.";
   }
 }

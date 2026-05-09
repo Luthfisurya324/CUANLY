@@ -20,11 +20,13 @@
   "license": "MIT",
   "dependencies": {
     "@cacheable/node-cache": "^1.5.8",
+    "@google/generative-ai": "^0.24.1",
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^6.7.16",
     "axios": "^1.7.9",
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.45.2",
+    "express": "^5.2.1",
     "openai": "^6.36.0",
     "pino": "^9.6.0",
     "postgres": "^3.4.9",
