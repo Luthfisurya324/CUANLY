@@ -30,7 +30,17 @@ export async function GET(
       );
     }
 
+    if (user.web_token_expires_at && new Date() > user.web_token_expires_at) {
+      return NextResponse.json(
+        { error: 'Link sudah kadaluarsa. Minta link baru via /web di bot.' },
+        { status: 401 }
+      );
+    }
+
     await setSession(user.id);
+
+    // Optional: invalidate token after single use
+    await db.update(users).set({ web_token: null, web_token_expires_at: null }).where(eq(users.id, user.id));
 
     return NextResponse.json({
       ok: true,
