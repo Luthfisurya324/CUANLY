@@ -17,6 +17,7 @@ export const users = pgTable('users', {
   created_at: timestamp('created_at').defaultNow().notNull(),
   pin: varchar('pin', { length: 6 }),
   web_token: varchar('web_token', { length: 64 }),
+  web_token_expires_at: timestamp('web_token_expires_at'),
 });
 
 export const transactions = pgTable('transactions', {

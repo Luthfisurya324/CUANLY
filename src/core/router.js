@@ -524,9 +524,14 @@ async function handleWebCommand(user) {
   try {
     // Generate a secure 32-byte hex token as the magic link
     const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1); // Token expires in 1 hour
 
     await db.update(users)
-      .set({ web_token: token })
+      .set({
+        web_token: token,
+        web_token_expires_at: expiresAt
+      })
       .where(eq(users.id, user.id));
 
     const magicUrl = `https://cuanlybot.vercel.app/auth/${token}`;
@@ -535,7 +540,7 @@ async function handleWebCommand(user) {
       `Mau liat rapor merah keuangan lo? 📊\n\n` +
       `Klik link ini buat masuk ke dashboard:\n` +
       `👉 ${magicUrl}\n\n` +
-      `Link berlaku terus sampai lo minta yang baru lagi pake /web.\n` +
+      `Link berlaku selama 1 jam sampai lo minta yang baru lagi pake /web.\n` +
       `Jangan kasih link ini ke siapapun ya bos. 🔐`
     );
   } catch (error) {
