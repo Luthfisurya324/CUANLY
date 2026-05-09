@@ -11,13 +11,13 @@ const logger = createLogger('router');
 const SPAM_CACHE = new Map();
 
 const COMMAND_HANDLERS = {
-  '/saldo':   handleBalanceCommand,
-  '/sisa':    handleBalanceCommand,
-  '/help':    handleHelpCommand,
+  '/saldo': handleBalanceCommand,
+  '/sisa': handleBalanceCommand,
+  '/help': handleHelpCommand,
   '/wishlist': handleWishlistCommand,
   '/upgrade': handleUpgradeCommand,
   '/migrasi': handleMigrasiCommand,
-  '/web':     handleWebCommand,
+  '/web': handleWebCommand,
 };
 
 /**
@@ -59,7 +59,7 @@ export async function processMessage(userId, platform, text, pushName, replyFn, 
       userResult = await db.select().from(users).where(eq(users.telegram_id, userId)).limit(1);
     }
     let user = userResult[0];
-    
+
     if (!user) {
       if (platform === 'telegram') {
         await replyFn("Lo belum link akun WA lo nih. Ketik /start buat info lebih lanjut.");
@@ -93,27 +93,19 @@ export async function processMessage(userId, platform, text, pushName, replyFn, 
         chat_count: 0,
         last_reset_date: new Date()
       }).where(eq(users.id, user.id));
-      
+
       user.chat_count = 0;
       user.last_reset_date = new Date();
     }
 
     if (user.tier === 'free' && user.chat_count >= 30) {
-      const upgradeMsg = `🚨 *LIMIT MINGGUAN LO UDAH HABIS, BOS!* 🚨
-
-Gaya selangit, jajan puluhan ribu lancar, giliran invest Rp15.000/bulan buat nyelametin dompet sendiri aja mendadak miskin? 💀💅
-
-Jatah 30 chat gratis lo minggu ini udah ludes. Mulai detik ini gue mogok nyatet pengeluaran lo.
-
-Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, silakan lanjut halu jadi crazy rich sampai saldo lo beneran koma. Bye! 👋💸`;
-      
-      await replyFn(upgradeMsg);
+      await replyFn("Jatah chat gratis mingguan lo udah ludes. Lo sanggup jajan puluhan ribu, masa bayar asisten AI 15rb/bulan buat nyelametin dompet lo aja gemeter? 💀 Ketik /upgrade sekarang kalau masih mau gue pantau, atau silakan lanjut halu.");
       return;
     }
 
     // ── State Machine: Onboarding Flow ─────────────────────
     if (user.onboarding_step === 'ASK_BUDGET') {
-      await db.update(users).set({ 
+      await db.update(users).set({
         onboarding_step: 'WAITING_BUDGET',
         chat_count: sql`${users.chat_count} + 1`,
         last_chat_date: new Date()
@@ -127,19 +119,19 @@ Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, si
       cleanText = cleanText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
       const match = cleanText.match(/\d+/);
       const amount = match ? parseInt(match[0], 10) : 0;
-      
+
       if (amount <= 0) {
-         await replyFn("Wah, gw ga ngerti angkanya. Coba ketik yang bener, misal: '1 juta' atau '2000000'");
-         return;
+        await replyFn("Wah, gw ga ngerti angkanya. Coba ketik yang bener, misal: '1 juta' atau '2000000'");
+        return;
       }
 
-      await db.update(users).set({ 
+      await db.update(users).set({
         monthly_budget: amount,
         onboarding_step: 'WAITING_WISHLIST',
         chat_count: sql`${users.chat_count} + 1`,
         last_chat_date: new Date()
       }).where(eq(users.id, user.id));
-      
+
       await replyFn("Sip, dicatet. Terus, lo lagi nabung pengen beli apa nih? (Sebutin barang & harganya, misal: Tiket Konser NIKI 1.5jt)");
       return;
     }
@@ -151,30 +143,30 @@ Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, si
       let wishlistTarget = parsed?.target_price || 0;
 
       if (!wishlistName || wishlistTarget <= 0) {
-          const match = text.match(/([a-zA-Z\s]+)\s*(.*)/);
-          if (match) {
-              wishlistName = match[1].trim();
-              let priceText = match[2].toLowerCase().replace(/rp|\s|\./g, '');
-              priceText = priceText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
-              const priceMatch = priceText.match(/\d+/);
-              wishlistTarget = priceMatch ? parseInt(priceMatch[0], 10) : 0;
-          }
+        const match = text.match(/([a-zA-Z\s]+)\s*(.*)/);
+        if (match) {
+          wishlistName = match[1].trim();
+          let priceText = match[2].toLowerCase().replace(/rp|\s|\./g, '');
+          priceText = priceText.replace(/juta|jt/g, '000000').replace(/ribu|k/g, '000');
+          const priceMatch = priceText.match(/\d+/);
+          wishlistTarget = priceMatch ? parseInt(priceMatch[0], 10) : 0;
+        }
       }
 
       if (wishlistName && wishlistTarget > 0) {
-          await db.update(users).set({
-            wishlist_name: wishlistName,
-            wishlist_target: wishlistTarget,
-            onboarding_step: 'DONE',
-            chat_count: sql`${users.chat_count} + 1`,
-            last_chat_date: new Date()
-          }).where(eq(users.id, user.id));
+        await db.update(users).set({
+          wishlist_name: wishlistName,
+          wishlist_target: wishlistTarget,
+          onboarding_step: 'DONE',
+          chat_count: sql`${users.chat_count} + 1`,
+          last_chat_date: new Date()
+        }).where(eq(users.id, user.id));
 
-          await replyFn(`Oke, target ${wishlistName} Rp ${new Intl.NumberFormat('id-ID').format(wishlistTarget)}. Mulai sekarang, tiap lo jajan atau dapet duit, ketik aja di sini. Kalo lo boros, siap-siap gue gas 💀. Coba tes ketik pengeluaran lo hari ini!`);
-          return;
+        await replyFn(`Oke, target ${wishlistName} Rp ${new Intl.NumberFormat('id-ID').format(wishlistTarget)}. Mulai sekarang, tiap lo jajan atau dapet duit, ketik aja di sini. Kalo lo boros, siap-siap gue gas 💀. Coba tes ketik pengeluaran lo hari ini!`);
+        return;
       } else {
-          await replyFn("Eh kurang jelas nih. Sebutin nama barang dan harganya ya, contoh: 'Sepatu 500rb' atau 'PS5 8 juta'.");
-          return;
+        await replyFn("Eh kurang jelas nih. Sebutin nama barang dan harganya ya, contoh: 'Sepatu 500rb' atau 'PS5 8 juta'.");
+        return;
       }
     }
 
@@ -184,7 +176,7 @@ Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, si
     if (mediaData) {
       await replyFn("Mata gue lagi nyecan struk lo, sabar...");
       const receiptData = await analyzeReceipt(mediaData.buffer, mediaData.mimetype);
-      
+
       logger.info({ receiptData }, 'Data hasil scan struk');
 
       if (receiptData === 'QUOTA_EXCEEDED') {
@@ -196,7 +188,7 @@ Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, si
         await replyFn("Ini foto apaan bos? Buram atau bukan struk nih. Ulangi yang bener fotonya!");
         return;
       }
-      
+
       const amount = receiptData.total_amount || receiptData.totalAmount || receiptData.amount;
       const items = receiptData.items || receiptData.item || receiptData.description || 'Barang belanjaan';
       let category = receiptData.category || 'lainnya';
@@ -205,7 +197,7 @@ Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, si
         await replyFn("Struk kebaca sih, tapi gue nggak nemu total harganya. Ulangi fotonya yang jelas di bagian Total/Grand Total!");
         return;
       }
-      
+
       isReceipt = true;
       parsed = {
         type: 'expense',
@@ -305,8 +297,8 @@ Ketik */upgrade* sekarang kalau lo emang niat waras ngatur duit. Atau yaudah, si
       monthlyBudget: user.monthly_budget,
       daysLeft: daysLeft,
       wishlistName: user.wishlist_name || 'Barang Impian',
-      wishlistProgress: user.wishlist_target && user.wishlist_target > 0 
-        ? Math.round((remainingBudget / user.wishlist_target) * 100) 
+      wishlistProgress: user.wishlist_target && user.wishlist_target > 0
+        ? Math.round((remainingBudget / user.wishlist_target) * 100)
         : 0,
     };
 
@@ -328,9 +320,9 @@ export async function handleIncomingMessage(sock, msg) {
   const jid = msg.key.remoteJid;
   const text = extractText(msg);
   const pushName = msg.pushName;
-  
+
   const isImage = !!(msg.message?.imageMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage);
-  
+
   if (!text && !isImage) return;
 
   const replyFn = async (replyText) => {
@@ -421,7 +413,7 @@ async function handleBalanceCommand(user) {
 
   const now = new Date();
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const daysLeft = endOfMonth.getDate() - now.getDate() || 1; 
+  const daysLeft = endOfMonth.getDate() - now.getDate() || 1;
   const dailyBudget = Math.floor(remainingBudget / daysLeft);
 
   const formatRp = (num) => new Intl.NumberFormat('id-ID').format(num);
@@ -502,8 +494,8 @@ async function handleWishlistCommand(user) {
 function handleUpgradeCommand(_user) {
   return (
     'Mau jadi member VIP Cuanly biar chat unlimited? 🔥\n\n' +
-    '1. Scan QRIS/Transfer Rp 15.000 ke Dana: 0812xxxxxx (a.n. Luthfi)\n' +
-    '2. Kirim bukti transfer (screenshot) ke nomor WA Admin: wa.me/628xxxxxx\n\n' +
+    '1. Scan Transfer Rp 15.000 ke Gopay: 085156773573 (a.n. Luthfi Surya Saputra)\n' +
+    '2. Kirim bukti transfer (screenshot) ke nomor WA Admin: wa.me/6285156773573\n\n' +
     'Nanti akun lo bakal langsung di-upgrade secara manual!'
   );
 }
