@@ -65,7 +65,8 @@ coverage/
 .nyc_output/
 
 # ---------- Business / Internal Docs ----------
-[BISNIS] CUANLY/
+\[BISNIS\]\ CUANLY/
+[[]BISNIS[]] CUANLY/
 
 # ---------- Misc ----------
 *.tgz
