@@ -62,7 +62,7 @@ export default function LoginPage() {
         {/* CTA Buttons */}
         <div className="space-y-3">
           <a
-            href="https://wa.me/628xxxxxx?text=/web"
+            href="https://wa.me/6288804035810?text=/web"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full flex items-center justify-center gap-2.5 bg-neutral-900 hover:bg-neutral-700 text-white font-bold text-xs tracking-widest uppercase py-4 transition-colors"

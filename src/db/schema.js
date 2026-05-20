@@ -26,6 +26,7 @@ export const transactions = pgTable('transactions', {
   type: varchar('type', { length: 20 }).notNull(), // 'expense' | 'income'
   amount: integer('amount').notNull(),
   category: varchar('category', { length: 50 }),
+  description: varchar('description', { length: 100 }), // nama transaksi yang sudah dirapikan AI
   payment_method: varchar('payment_method', { length: 50 }),
   raw_input: text('raw_input'),
   created_at: timestamp('created_at').defaultNow().notNull(),

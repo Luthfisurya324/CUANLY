@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Zap, LogOut, ChevronRight } from 'lucide-react';
+import { Zap, LogOut, ChevronRight, X, MessageCircle, Copy, Check } from 'lucide-react';
 
 interface UserProfile {
   display_name: string | null;
@@ -19,6 +19,15 @@ export default function SettingsPage() {
   const [wishlistTarget, setWishlistTarget] = useState('');
   const [saved,          setSaved]          = useState(false);
   const [saving,         setSaving]         = useState(false);
+  const [showUpgrade,    setShowUpgrade]    = useState(false);
+  const [copied,         setCopied]         = useState(false);
+  const [displayName,    setDisplayName]    = useState('');
+  const [nameSaved,      setNameSaved]      = useState(false);
+  const [nameSaving,     setNameSaving]     = useState(false);
+
+  const GOPAY_NUMBER  = '085156773573';
+  const BOT_WA_NUMBER = '6288804035810';
+  const UPGRADE_PRICE = 'Rp 15.000';
 
   useEffect(() => {
     fetch('/api/me/dashboard')
@@ -29,11 +38,33 @@ export default function SettingsPage() {
       .then(json => {
         if (json) {
           setProfile(json.user);
+          setDisplayName(json.user.display_name ?? '');
           setWishlistName(json.user.wishlist_name ?? '');
           setWishlistTarget(json.user.wishlist_target ? String(json.user.wishlist_target) : '');
         }
       });
   }, [router]);
+
+  const handleSaveName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!displayName.trim() || displayName.trim().length < 2) return;
+    setNameSaving(true);
+    try {
+      const res = await fetch('/api/me/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name: displayName }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setProfile(prev => prev ? { ...prev, display_name: json.display_name ?? displayName } : prev);
+        setNameSaved(true);
+        setTimeout(() => setNameSaved(false), 2500);
+      }
+    } finally {
+      setNameSaving(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,12 +87,87 @@ export default function SettingsPage() {
     router.push('/');
   };
 
-  const initials = profile?.display_name
-    ? profile.display_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  const handleCopyGopay = () => {
+    navigator.clipboard.writeText(GOPAY_NUMBER);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const waUpgradeLink = `https://wa.me/${BOT_WA_NUMBER}?text=${encodeURIComponent('/upgrade')}`;
+
+  const initials = (profile?.display_name || displayName)
+    ? (profile?.display_name || displayName).split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()
     : (profile?.wa_number.slice(-2) ?? '??');
 
   return (
     <div className="pt-8 pb-4 animate-fade-in-up">
+
+      {/* ── Upgrade Modal ─────────────────────────────── */}
+      {showUpgrade && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-end justify-center p-0">
+          <div className="w-full max-w-md bg-white animate-fade-in-up">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-neutral-200">
+              <div>
+                <p className="text-[9px] font-bold tracking-widest text-neutral-400 uppercase">Upgrade</p>
+                <h2 className="text-lg font-extrabold tracking-tight text-neutral-900">MODE TOBAT 🔥</h2>
+              </div>
+              <button onClick={() => setShowUpgrade(false)} className="p-1.5 hover:bg-neutral-100 transition-colors">
+                <X className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+
+            <div className="px-5 py-5 space-y-5">
+              {/* Step 1 */}
+              <div className="flex gap-4 items-start">
+                <div className="w-7 h-7 bg-neutral-900 text-white text-xs font-extrabold flex items-center justify-center flex-shrink-0">1</div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-neutral-900">Transfer {UPGRADE_PRICE} ke Gopay</p>
+                  <p className="text-xs text-neutral-500 mt-0.5 mb-2">a.n. Luthfi Surya Saputra</p>
+                  <div className="flex items-center gap-2 border border-neutral-200 bg-neutral-50 px-3 py-2">
+                    <span className="font-mono font-bold text-neutral-900 text-sm flex-1">{GOPAY_NUMBER}</span>
+                    <button
+                      onClick={handleCopyGopay}
+                      className="flex items-center gap-1 text-[10px] font-bold tracking-wider text-neutral-500 hover:text-neutral-900 transition-colors"
+                    >
+                      {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copied ? 'COPIED' : 'COPY'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="flex gap-4 items-start">
+                <div className="w-7 h-7 bg-neutral-900 text-white text-xs font-extrabold flex items-center justify-center flex-shrink-0">2</div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-neutral-900">Chat bot WA Cuanly</p>
+                  <p className="text-xs text-neutral-500 mt-0.5 mb-2">
+                    Kirim perintah <span className="font-mono bg-neutral-100 px-1.5 py-0.5 text-neutral-800">/upgrade</span> ke bot, lalu ikuti instruksinya untuk kirim bukti transfer.
+                  </p>
+                  <a
+                    href={waUpgradeLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full bg-neutral-900 hover:bg-neutral-700 text-white font-bold text-xs tracking-widest uppercase py-3 transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    BUKA CHAT BOT WA
+                  </a>
+                </div>
+              </div>
+
+              {/* Info */}
+              <div className="border-l-[3px] border-neutral-300 bg-neutral-50 px-3 py-2.5">
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Akun lo akan di-upgrade dalam <span className="font-semibold text-neutral-700">1×24 jam</span> setelah bukti transfer dikonfirmasi admin.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── End Modal ─────────────────────────────────── */}
       <div className="px-4 mb-6">
         <p className="text-[9px] font-bold tracking-widest text-neutral-400 uppercase mb-1">Akun</p>
         <h1 className="text-2xl font-extrabold tracking-tight text-neutral-900">Pengaturan</h1>
@@ -70,15 +176,15 @@ export default function SettingsPage() {
       {/* Profile Card */}
       <div className="bg-white border-t border-b border-neutral-200 px-4 py-5 mb-4">
         <p className="text-[9px] font-bold tracking-widest text-neutral-400 uppercase mb-4">Profil</p>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 mb-5">
           <div className="w-16 h-16 bg-neutral-900 flex items-center justify-center flex-shrink-0">
             <span className="text-white text-xl font-extrabold tracking-wider">{initials}</span>
           </div>
           <div>
             <p className="text-base font-bold text-neutral-900">{profile?.display_name ?? 'Bos Boncos'}</p>
             <p className="text-sm text-neutral-500 mt-0.5">
-              {profile?.wa_number.startsWith('62') 
-                ? `+${profile.wa_number}` 
+              {profile?.wa_number.startsWith('62')
+                ? `+${profile.wa_number}`
                 : `ID: ${profile?.wa_number}`}
             </p>
             <div className="mt-2 inline-block border border-neutral-300 px-2 py-0.5">
@@ -88,6 +194,33 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Ganti Nama */}
+        <form onSubmit={handleSaveName} className="space-y-2">
+          <label className="text-[9px] font-bold tracking-widest text-neutral-500 uppercase block">Ganti Nama</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={displayName}
+              onChange={e => setDisplayName(e.target.value)}
+              maxLength={50}
+              className="flex-1 border border-neutral-300 focus:border-neutral-900 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:outline-none transition-colors"
+              placeholder="Nama lo yang beneran"
+            />
+            <button
+              type="submit"
+              disabled={nameSaving || displayName.trim().length < 2}
+              className={`px-4 py-2.5 text-[10px] font-bold tracking-widest uppercase transition-all flex-shrink-0 ${
+                nameSaved
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-neutral-900 hover:bg-neutral-700 disabled:bg-neutral-300 text-white'
+              }`}
+            >
+              {nameSaving ? '...' : nameSaved ? '✓' : 'SIMPAN'}
+            </button>
+          </div>
+          <p className="text-[10px] text-neutral-400">Emoji dan simbol akan dihapus otomatis.</p>
+        </form>
       </div>
 
       {/* Update Wishlist */}
@@ -170,7 +303,9 @@ export default function SettingsPage() {
               <p className="text-2xl font-extrabold">Rp 15.000<span className="text-sm font-normal text-neutral-400">/bln</span></p>
               <p className="text-neutral-500 text-[10px]">Lebih murah dari seblak sebulan.</p>
             </div>
-            <button className="bg-white text-neutral-900 hover:bg-neutral-100 font-bold text-xs tracking-widest uppercase px-5 py-3 transition-colors">
+            <button
+                onClick={() => setShowUpgrade(true)}
+                className="bg-white text-neutral-900 hover:bg-neutral-100 font-bold text-xs tracking-widest uppercase px-5 py-3 transition-colors">
               UPGRADE
             </button>
           </div>

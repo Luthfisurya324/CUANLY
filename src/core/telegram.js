@@ -4,6 +4,10 @@ import { users } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
 import { processMessage } from './router.js';
+import https from 'https';
+
+// Force IPv4 untuk koneksi ke Telegram API (fix ETIMEDOUT di AWS)
+const ipv4Agent = new https.Agent({ family: 4 });
 
 const logger = createLogger('telegram');
 
@@ -13,12 +17,40 @@ export function startTelegramBot() {
     logger.error("TELEGRAM_TOKEN tidak ditemukan di environment variables!");
     return null;
   }
-  const bot = new Telegraf(TELEGRAM_TOKEN);
+  const bot = new Telegraf(TELEGRAM_TOKEN, {
+    telegram: { agent: ipv4Agent }
+  });
 
-  bot.command('start', (ctx) => {
-    ctx.reply(
-      "Woy. Lo user baru atau pelarian dari WA yang kena blokir?\n\n" +
-      "Ketik /link [KODE_MIGRASI] kalau lo mau narik data dari WA."
+  bot.command('start', async (ctx) => {
+    const telegramId = ctx.from.id.toString();
+
+    // Cek apakah user sudah punya akun
+    const userResult = await db.select().from(users).where(eq(users.telegram_id, telegramId)).limit(1);
+    const user = userResult[0];
+
+    if (user && user.onboarding_step === 'DONE') {
+      // User sudah onboarding selesai
+      return ctx.reply(
+        `Woy ${user.display_name || 'bos'}, lo udah terdaftar! 👋\n\n` +
+        `Langsung aja catat pengeluaran lo, atau ketik /help buat liat semua command.`
+      );
+    }
+
+    if (user) {
+      // User ada tapi onboarding belum selesai — lanjutkan flow
+      const replyFn = async (text) => ctx.reply(text);
+      const pushName = ctx.from.first_name || 'Bos';
+      await processMessage(telegramId, 'telegram', '/start_resume', pushName, replyFn);
+      return;
+    }
+
+    // User baru — sambut dan mulai onboarding via pesan pertama
+    return ctx.reply(
+      `Woy! Gue *Cuanly* 👋\n\n` +
+      `Asisten keuangan lo yang anti-basa-basi dan siap nge-roast tiap lo boros.\n\n` +
+      `Sebelum mulai, ketik aja sesuatu — gue langsung tanya budget lo. Atau kalau lo pindahan dari WA, ketik:\n` +
+      `/link [KODE_MIGRASI]`,
+      { parse_mode: 'Markdown' }
     );
   });
 
@@ -60,7 +92,8 @@ export function startTelegramBot() {
 
   // Handle all other text messages
   bot.on('text', async (ctx) => {
-    // Abaikan command start dan link yang sudah di-handle di atas
+    // Abaikan command /link yang sudah di-handle di atas
+    // /start sudah handle onboarding, tapi tetap skip agar tidak double-process
     if (ctx.message.text.startsWith('/start') || ctx.message.text.startsWith('/link')) return;
 
     const telegramId = ctx.from.id.toString();

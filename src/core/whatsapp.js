@@ -15,11 +15,17 @@ const logger = createLogger('whatsapp');
 
 const msgRetryCounterCache = new NodeCache();
 
+// Deduplication: track processed message IDs to avoid double-processing
+// (Baileys retry mechanism & HF container wake-up can re-deliver messages)
+const PROCESSED_MSG_IDS = new Set();
+const MAX_PROCESSED_IDS = 500;
+
 /** @type {import('@whiskeysockets/baileys').WASocket | null} */
 let sock = null;
 
 let currentQR = '';
 export const getCurrentQR = () => currentQR;
+export const getSock = () => sock;
 
 /**
  * Inisialisasi koneksi WhatsApp via Baileys.
@@ -93,6 +99,24 @@ export async function startWhatsApp() {
       // Skip pesan dari diri sendiri atau pesan tanpa content
       if (msg.key.fromMe) continue;
       if (!msg.message) continue;
+
+      // ── DEDUPLICATION: Skip jika message ID ini sudah pernah diproses ──
+      // Ini mencegah Baileys retry/re-delivery memproses pesan yang sama dua kali
+      const msgId = msg.key.id;
+      if (msgId && PROCESSED_MSG_IDS.has(msgId)) {
+        logger.warn(`[DEDUP] Skipping duplicate message: ${msgId}`);
+        continue;
+      }
+
+      // Tandai sebagai sudah diproses (sebelum async handler)
+      if (msgId) {
+        PROCESSED_MSG_IDS.add(msgId);
+        // Bersihkan cache lama supaya tidak memory leak
+        if (PROCESSED_MSG_IDS.size > MAX_PROCESSED_IDS) {
+          const firstKey = PROCESSED_MSG_IDS.values().next().value;
+          PROCESSED_MSG_IDS.delete(firstKey);
+        }
+      }
 
       try {
         await handleIncomingMessage(sock, msg);

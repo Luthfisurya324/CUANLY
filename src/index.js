@@ -2,8 +2,9 @@ import 'dotenv/config';
 import express from 'express';
 import dns from 'dns';
 import { createLogger } from './utils/logger.js';
-import { startWhatsApp, getCurrentQR } from './core/whatsapp.js';
+import { startWhatsApp, getCurrentQR, getSock } from './core/whatsapp.js';
 import { startTelegramBot } from './core/telegram.js';
+import { startWeeklyScheduler } from './services/notifier.js';
 
 // WORKAROUND UNTUK HUGGING FACE: Force IPv4 untuk node-fetch dan Websocket
 // Ini akan memperbaiki error "Client network socket disconnected before secure TLS connection was established"
@@ -82,10 +83,16 @@ async function main() {
   }
 
   // Start Telegram Bot
-  startTelegramBot();
+  const tgBot = startTelegramBot();
 
   // Start WhatsApp connection
   await startWhatsApp();
+
+  // Start weekly report scheduler (Senin 09.00 WIB)
+  startWeeklyScheduler(
+    () => getSock(),
+    () => tgBot
+  );
 }
 
 main().catch(err => {
