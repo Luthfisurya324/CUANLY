@@ -64,9 +64,11 @@ ehthumbs.db
 coverage/
 .nyc_output/
 
-# ---------- Business / Internal Docs ----------
+# ---------- Business / Internal Docs (private) ----------
 \[BISNIS\]\ CUANLY/
 [[]BISNIS[]] CUANLY/
+PRD-Cuanly.md
+README.md
 
 # ---------- Misc ----------
 *.tgz
