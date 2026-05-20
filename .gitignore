@@ -1,16 +1,21 @@
 # ============================================
-# CUANLY — WhatsApp Bot .gitignore
+# CUANLY — .gitignore
 # ============================================
 
 # ---------- Dependencies ----------
 node_modules/
+frontend/node_modules/
 
 # ---------- Environment Variables ----------
 .env
 .env.*
 !.env.example
+frontend/.env.local
+frontend/.env*.local
 
-# ---------- Baileys Auth Session (SENSITIF!) ----------
+# ---------- Secrets & Keys ----------
+*.pem
+*.key
 auth_info/
 
 # ---------- Logs ----------
@@ -19,6 +24,26 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pino-pretty.log
+
+# ---------- Next.js ----------
+frontend/.next/
+frontend/out/
+
+# ---------- Build / Output ----------
+dist/
+build/
+out/
+
+# ---------- AI / IDE Tools ----------
+.kiro/
+.jules/
+.cursor/
+.windsurf/
+.copilot/
+
+# ---------- Vercel ----------
+.vercel
 
 # ---------- OS Files ----------
 .DS_Store
@@ -26,7 +51,7 @@ Thumbs.db
 desktop.ini
 ehthumbs.db
 
-# ---------- IDE / Editor ----------
+# ---------- Editor ----------
 .vscode/
 .idea/
 *.swp
@@ -35,20 +60,13 @@ ehthumbs.db
 *.sublime-project
 *.sublime-workspace
 
-# ---------- Build / Output ----------
-dist/
-build/
-out/
-
 # ---------- Coverage & Testing ----------
 coverage/
 .nyc_output/
 
 # ---------- Business / Internal Docs ----------
-\[BISNIS\] CUANLY/
+[BISNIS] CUANLY/
 
 # ---------- Misc ----------
 *.tgz
 .cache/
-
-.vercel
